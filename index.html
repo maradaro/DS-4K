@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bushnell Trail Camera Simulator (互動模擬器)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto Mono', monospace;
+            touch-action: manipulation;
+        }
+        .camera-body {
+            background-color: #4a4a4a;
+            background-image: linear-gradient(45deg, #525252 25%, transparent 25%), 
+                              linear-gradient(-45deg, #525252 25%, transparent 25%),
+                              linear-gradient(45deg, transparent 75%, #525252 75%),
+                              linear-gradient(-45deg, transparent 75%, #525252 75%);
+            background-size: 2px 2px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.3), inset 0 0 15px rgba(0,0,0,0.5);
+        }
+        .view-screen-container {
+            background-color: #333;
+            border: 2px solid #222;
+            padding: 0.75rem;
+        }
+        .view-screen {
+            background-color: #000;
+            border: 4px solid #1a1a1a;
+            font-weight: 500;
+            position: relative;
+            overflow: hidden;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .view-screen.off { background-color: #2d302b; }
+        .view-screen video, .view-screen img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain; 
+            transition: transform 0.2s ease-out;
+        }
+        .hidden { display: none; }
+
+        .btn-3d {
+            background: linear-gradient(145deg, #5a5a5a, #3c3c3c);
+            color: #ddd;
+            border: 1px solid #2a2a2a;
+            box-shadow: 3px 3px 6px #222, -3px -3px 6px #666;
+            transition: all 0.1s ease-in-out;
+            user-select: none;
+        }
+        .btn-3d:active {
+            background: linear-gradient(145deg, #3c3c3c, #5a5a5a);
+            box-shadow: inset 2px 2px 5px #222, inset -2px -2px 5px #666;
+            transform: translateY(1px);
+        }
+        
+        .d-pad {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: 1fr 1fr 1fr;
+            width: 150px;
+            height: 150px;
+        }
+        .d-pad > .btn-3d { position: relative; }
+        #btn-up    { grid-area: 1 / 2 / 2 / 3; border-radius: 8px 8px 0 0; }
+        #btn-down  { grid-area: 3 / 2 / 4 / 3; border-radius: 0 0 8px 8px; }
+        #btn-left  { grid-area: 2 / 1 / 3 / 2; border-radius: 8px 0 0 8px; }
+        #btn-right { grid-area: 2 / 3 / 3 / 4; border-radius: 0 8px 8px 0; }
+        #btn-ok    { grid-area: 2 / 2 / 3 / 3; border-radius: 50%; z-index: 1; font-size: 1rem; }
+
+        .power-switch-slider {
+            width: 40px;
+            height: 70px;
+            background-color: #2d2d2d;
+            border-radius: 5px;
+            padding: 4px;
+            box-shadow: inset 2px 2px 4px #111;
+            cursor: pointer;
+        }
+        .power-switch-knob {
+            width: 100%;
+            height: 50%;
+            background: linear-gradient(145deg, #6a6a6a, #4a4a4a);
+            border-radius: 3px;
+            transition: transform 0.2s ease, background 0.2s ease;
+            box-shadow: 0 2px 3px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+        .power-switch-knob.on {
+            transform: translateY(0%);
+            background: linear-gradient(145deg, #4CAF50, #388E3C);
+        }
+        .power-switch-knob.off { transform: translateY(100%); }
+
+        .menu-item-text.selected {
+             background-color: #4b5563;
+             color: #f3f4f6;
+             border: 1px solid #6b7280;
+        }
+        .checkmark-box, .placeholder-box {
+            width: 1.25rem;
+            height: 1.25rem;
+            flex-shrink: 0;
+        }
+        .checkmark-box.checked { border: 2px solid #ef4444; }
+        .checkmark-box.checked::after {
+            content: '✓';
+            color: #fff;
+            font-weight: bold;
+            background-color: #ef4444;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .keyboard-char.selected { background-color: #90ee90; color: #1f2937; }
+        .time-field.selected { background-color: #facc15; color: #1f2937; }
+
+        .modal-backdrop { background-color: rgba(0, 0, 0, 0.7); }
+        #temp-message-overlay { transition: opacity 0.3s ease-in-out; }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        .recording-dot {
+            width: 12px; height: 12px;
+            background-color: red;
+            border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-xl">
+        <div class="camera-body rounded-2xl p-4 flex flex-col relative overflow-hidden border-2 border-black">
+            
+            <div class="flex gap-4 items-center">
+                <div class="flex-1 view-screen-container rounded-lg">
+                    <div id="view-screen" class="view-screen off">
+                        <video id="webcam-feed" autoplay playsinline class="hidden"></video>
+                        <img id="playback-image" class="hidden">
+                        <div id="screen-message" class="absolute inset-0"></div>
+                        <div id="live-view-overlay" class="absolute inset-0 pointer-events-none hidden"></div>
+                        <div id="temp-message-overlay" class="absolute inset-0 z-20 flex items-center justify-center bg-black/80 text-white text-lg font-bold p-4 text-center whitespace-pre-wrap hidden leading-relaxed"></div>
+                    </div>
+                </div>
+
+                <div class="flex-shrink-0 flex flex-col justify-center items-center gap-4">
+                    <div class="d-pad">
+                        <button id="btn-up" class="btn-3d flex items-center justify-center">▲</button>
+                        <button id="btn-left" class="btn-3d flex items-center justify-center">◀</button>
+                        <button id="btn-ok" class="btn-3d font-bold">OK</button>
+                        <button id="btn-right" class="btn-3d flex items-center justify-center">▶</button>
+                        <button id="btn-down" class="btn-3d flex items-center justify-center">▼</button>
+                    </div>
+                    <div class="flex justify-between items-center w-[150px]">
+                        <div class="text-center text-white">
+                            <span class="text-xs">ON</span>
+                            <div id="power-switch-slider" class="power-switch-slider">
+                                <div id="power-switch-knob" class="power-switch-knob off"></div>
+                            </div>
+                            <span class="text-xs">OFF</span>
+                        </div>
+                        <button id="btn-menu" class="btn-3d w-[50px] h-[50px] rounded-lg text-sm">MENU</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="mt-6 flex flex-col items-center gap-4">
+        <label class="flex items-center gap-2 cursor-pointer bg-gray-800 text-white px-4 py-2 rounded-lg border border-gray-600 shadow select-none hover:bg-gray-700">
+            <input type="checkbox" id="env-night-toggle" class="w-5 h-5 accent-blue-500">
+            <span class="font-bold">Simulate Night Environment (模擬黑夜環境)</span>
+        </label>
+    </div>
+
+    <!-- 操作說明面板 (已移至參數面板上方) -->
+    <div class="w-full max-w-xl mx-auto mt-6 p-5 bg-gray-800 border border-gray-600 rounded-lg text-gray-300 text-sm shadow-md leading-relaxed">
+        <h3 class="font-bold text-lg text-center mb-4 text-white">How to Use (操作說明)</h3>
+        <ul class="list-disc pl-5 space-y-4">
+            <li><strong class="text-white">開機：</strong>點擊相機上的 <kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-1">ON/OFF</kbd> 滑桿開啟電源。</li>
+            <li><strong class="text-white">設定：</strong>點擊 <kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-1">MENU</kbd> 進入選單，使用 <kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-0.5">▲</kbd> <kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-0.5">▼</kbd> 上下選擇，<kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-0.5">◀</kbd> <kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-0.5">▶</kbd> 切換數值或換頁，點擊 <kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-1">OK</kbd> 儲存。</li>
+            <li><strong class="text-white">拍攝：</strong>在即時畫面 (LIVE) 下，點擊十字鍵的 <kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-1">▶ (右鍵)</kbd> 即可手動觸發拍照或錄影。</li>
+            <li><strong class="text-white">回放：</strong>在即時畫面 (LIVE) 下，點擊 <kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-1">OK</kbd> 進入相簿瀏覽，使用 <kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-0.5">▲</kbd> <kbd class="bg-gray-700 text-yellow-400 px-2 py-1 rounded border border-gray-500 font-bold shadow-sm mx-0.5">▼</kbd> 切換照片/影片檔案。</li>
+        </ul>
+    </div>
+
+    <!-- 設定資訊面板 -->
+    <div id="settings-summary" class="w-full max-w-xl mx-auto text-white text-sm mt-6 mb-10 p-4 bg-gray-800 border border-gray-600 rounded-lg hidden">
+        <h3 class="font-bold text-lg text-center mb-2 text-gray-300">Current Settings (目前參數狀態)</h3>
+        <div id="clock-display" class="font-mono text-center mb-4 w-fit mx-auto text-base bg-black text-orange-500 px-4 py-1 rounded border border-gray-700 shadow-inner tracking-widest"></div>
+        <div id="settings-table" class="grid grid-cols-1 md:grid-cols-2 md:gap-x-6 gap-y-1 font-mono text-sm">
+            <!-- Settings will be injected here by JavaScript -->
+        </div>
+    </div>
+
+    <!-- 確認對話框 Modal -->
+    <div id="modal" class="fixed inset-0 z-50 items-center justify-center hidden">
+        <div class="modal-backdrop absolute inset-0"></div>
+        <div class="bg-white rounded-lg shadow-xl p-6 z-10 w-11/12 max-w-xs text-center">
+            <h3 id="modal-title" class="text-lg font-bold mb-4">Confirm (確認)</h3>
+            <p id="modal-message" class="mb-6">Are you sure you want to perform this action? (您確定要執行此操作嗎？)</p>
+            <div class="flex justify-center gap-4">
+                <button id="modal-confirm" class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded">OK (確定)</button>
+                <button id="modal-cancel" class="bg-gray-300 hover:bg-gray-400 text-black px-6 py-2 rounded">Cancel (取消)</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+// ==========================================
+// 1. 全域變數與選項設定
+// ==========================================
+const delayOptions = ['0.5S'];
+for (let i = 1; i <= 59; i++) delayOptions.push(i + 'S');
+for (let i = 1; i <= 60; i++) delayOptions.push(i + 'M');
+
+const videoLengthOptions = [];
+for (let i = 5; i <= 60; i++) videoLengthOptions.push(i + 'S');
+videoLengthOptions.push('Dynamic (動態)');
+
+const keyboardLayouts = [
+    '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ←_ -', 
+    'abcdefghijklmnopqrstuvwxyz!@#$%^&*()←+.:'  
+];
+
+const menuStructure = [
+    { name: 'Time & Date (時間與日期)', type: 'action', action: 'setTimeDate' },
+    { name: 'Pre-Sets (預設集)', type: 'options', key: 'preSet', options: ['Feeder (定點餵食區)', 'Trail (獸徑)', 'Food Plot (開闊覓食區)', 'Advanced (進階自訂)'] },
+    { name: 'Mode (模式)', type: 'options', key: 'mode', options: ['Camera (相機)', 'Video (影片)', 'Hybrid (混合)'] },
+    { name: 'Image Size (影像尺寸)', type: 'options', key: 'imageSize', options: ['Low (低)', 'Medium (中)', 'High (高)'] },
+    { name: 'Capture Number (拍攝張數)', type: 'options', key: 'captureNumber', options: [1, 2, 3, 4, 5, 6] },
+    { name: 'Image Format (影像格式)', type: 'options', key: 'imageFormat', options: ['4:3', '16:9'] },
+    { name: 'Illumination (夜視亮度)', type: 'options', key: 'illuminationMode', options: ['Low (低)', 'Fast Motion (快速移動)', 'Long Range (長距離)'] },
+    { name: 'Camera Name (相機名稱)', type: 'action', action: 'setCameraName' },
+    { name: 'Video Size (影片尺寸)', type: 'options', key: 'videoSize', options: ['1280x720', '1920x1080', '3840x2160'] },
+    { name: 'Video Length (影片長度)', type: 'options', key: 'videoLength', options: videoLengthOptions },
+    { name: 'Delay (延遲)', type: 'options', key: 'delay', options: delayOptions },
+    { name: 'Sensor Level (感應靈敏度)', type: 'options', key: 'sensorLevel', options: ['Low (低)', 'Med (中)', 'High (高)', 'Auto (自動)'] },
+    { name: 'Camera Mode (運作時段)', type: 'options', key: 'cameraMode', options: ['Day (白天)', 'Night (黑夜)', '24hrs (24小時)'] },
+    { name: 'Format (格式化)', type: 'action', action: 'formatSD' },
+    { name: 'Time Stamp (時間戳)', type: 'options', key: 'timeStamp', options: ['On (開啟)', 'Off (關閉)'] },
+    { name: 'Field Scan (現場掃描)', type: 'options', key: 'fieldScan', options: ['On (開啟)', 'Off (關閉)'] },
+    { name: 'Coordinate (座標輸入)', type: 'options', key: 'coordinateInput', options: ['On (開啟)', 'Off (關閉)'] },
+    { name: 'Default (恢復預設)', type: 'action', action: 'resetToDefault' },
+    { name: 'Firmware (韌體版本)', type: 'info', info: 'BS745C2YL2006006' },
+];
+
+let cameraState = {};
+let modalCallback = null;
+let dummyStreamInterval = null; 
+
+let viewScreen, webcamFeed, playbackImage, screenMessage, powerSwitchSlider, powerSwitchKnob;
+let modal, modalTitle, modalMessage, modalConfirm, modalCancel, liveViewOverlay, tempMessageOverlay, envNightToggle;
+
+// ==========================================
+// 2. 輔助函式 (Modal & Messages) - 置於全域
+// ==========================================
+function showConfirmationModal(title, msg, onConfirm) {
+    if (!modal) return;
+    modalTitle.textContent = title; 
+    modalMessage.textContent = msg;
+    modal.style.display = 'flex'; 
+    modalCallback = onConfirm;
+}
+
+function hideModal() {
+    if (!modal) return;
+    modal.style.display = 'none'; 
+    modalCallback = null; 
+}
+
+function showTemporaryMessage(msg, duration = 2500) {
+    if (!tempMessageOverlay) return;
+    tempMessageOverlay.textContent = msg; 
+    tempMessageOverlay.classList.remove('hidden');
+    setTimeout(() => tempMessageOverlay.classList.add('hidden'), duration);
+}
+
+// ==========================================
+// 3. 核心邏輯 (重置、攝影機、渲染)
+// ==========================================
+function resetToDefault(showModal = false) {
+    const performReset = () => {
+        const currentTime = (cameraState && cameraState.settings && cameraState.settings.timeAndDate) 
+            ? cameraState.settings.timeAndDate 
+            : new Date('2021-01-01T00:00:00'); 
+            
+        const currentSD = (cameraState && cameraState.sdCard) ? cameraState.sdCard : {
+            files: [],
+            photoCapacity: { 'High (高)': 7833, 'Medium (中)': 17987, 'Low (低)': 80941 },
+            videoCapacity: { '3840x2160': 29104, '1920x1080': 13335, '1280x720': 8072 },
+            remainingVideoTime: 13335,
+        };
+
+        const currentStream = (cameraState && cameraState.webcamStream) ? cameraState.webcamStream : null;
+        const currentClock = (cameraState && cameraState.ui && cameraState.ui.clockInterval) ? cameraState.ui.clockInterval : null;
+
+        cameraState = {
+            power: 'ON', 
+            webcamStream: currentStream,
+            env: {
+                isNight: envNightToggle ? envNightToggle.checked : false
+            },
+            sdCard: currentSD,
+            settings: {
+                timeAndDate: currentTime,
+                preSet: 'Advanced (進階自訂)',
+                mode: 'Camera (相機)',
+                imageSize: 'Medium (中)',
+                captureNumber: 1,
+                imageFormat: '16:9',
+                illuminationMode: 'Long Range (長距離)',
+                cameraName: 'CORE_CAM',
+                videoSize: '1920x1080',
+                videoLength: '10S',
+                delay: '10S',
+                sensorLevel: 'Auto (自動)',
+                cameraMode: '24hrs (24小時)',
+                timeStamp: 'On (開啟)',
+                fieldScan: 'Off (關閉)',
+                coordinateInput: 'Off (關閉)',
+                coordinateInputText: '',
+                fieldScanData: {
+                    aStartH: 5, aStartM: 30, aStopH: 9, aStopM: 0,
+                    bStartH: 15, bStartM: 30, bStopH: 19, bStopM: 30,
+                    intervalM: 5
+                }
+            },
+            ui: {
+                currentScreen: 'LIVE', 
+                menu: { currentPageIndex: 0, selectedOptionIndex: 0 },
+                playbackIndex: 0,
+                keyboard: { tempText: '', cursorX: 0, cursorY: 0, page: 0, target: 'cameraName' },
+                timeSetter: { tempDate: new Date(currentTime.getTime()), fieldIndex: 0 },
+                fieldScanSetter: { fieldIndex: 0 },
+                isRecording: false,
+                recordingTimer: 0,
+                recordingIntervalId: null,
+                recordingTimeoutId: null,
+                currentRecordingFile: null,
+                playbackState: 'paused',
+                playbackTimer: 0,
+                playbackIntervalId: null,
+                playbackZoomState: 'normal',
+                zoomLevel: 1.0,
+                panOffset: { x: 0, y: 0 },
+                deleteConfirmStep: 0, 
+                deleteAction: null, 
+                deleteDefaultOption: 'Delete Current (刪除目前檔案)',
+                clockInterval: currentClock 
+            }
+        };
+        render();
+    };
+
+    if (showModal) showConfirmationModal('Reset Settings (重置設定)', 'Are you sure you want to restore all settings to factory defaults? (您確定要將所有設定恢復為出廠預設值嗎？)', performReset);
+    else performReset();
+}
+
+async function initWebcam() {
+    if (cameraState.webcamStream) {
+        cameraState.webcamStream.getTracks().forEach(track => track.stop());
+    }
+    if (dummyStreamInterval) {
+        clearInterval(dummyStreamInterval);
+        dummyStreamInterval = null;
+    }
+    
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        cameraState.webcamStream = stream;
+        webcamFeed.srcObject = stream;
+        cameraState.ui.currentScreen = 'LIVE';
+    } catch (err) {
+        console.log("無法取得攝影機權限:", err);
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 640;
+            canvas.height = 480;
+            const ctx = canvas.getContext('2d');
+
+            dummyStreamInterval = setInterval(() => {
+                ctx.fillStyle = '#222';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.font = '24px "Roboto Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('CAMERA PERMISSION DENIED', canvas.width/2, canvas.height/2 - 20);
+                ctx.fillText('SIMULATING FEED...', canvas.width/2, canvas.height/2 + 20);
+                
+                ctx.fillStyle = `hsl(${Math.floor(Date.now() / 10) % 360}, 70%, 50%)`;
+                ctx.fillRect((Date.now() / 5) % (canvas.width + 50) - 50, 350, 50, 50);
+            }, 1000 / 24);
+
+            const stream = canvas.captureStream(24);
+            cameraState.webcamStream = stream;
+            webcamFeed.srcObject = stream;
+            cameraState.ui.currentScreen = 'LIVE';
+            
+            showTemporaryMessage("Camera permission denied.\nSimulated feed enabled.\n(無法取得實體鏡頭權限，已自動啟用模擬備用畫面)");
+        } catch (fallbackErr) {
+            cameraState.ui.currentScreen = 'MESSAGE';
+            screenMessage.innerHTML = `<div class="text-white p-4 font-bold text-center">Camera permission denied.<br>Please check browser settings.<br>(無法取得攝影機權限。請檢查瀏覽器設定。)</div>`;
+        }
+    }
+    render();
+}
+
+function stopWebcam() {
+    if (cameraState.webcamStream) cameraState.webcamStream.getTracks().forEach(track => track.stop());
+    if (webcamFeed) webcamFeed.srcObject = null;
+    if (dummyStreamInterval) {
+        clearInterval(dummyStreamInterval);
+        dummyStreamInterval = null;
+    }
+}
+
+function render() {
+    if (!viewScreen) return;
+    webcamFeed.classList.add('hidden');
+    playbackImage.classList.add('hidden');
+    liveViewOverlay.classList.add('hidden');
+    screenMessage.innerHTML = '';
+    
+    if (cameraState.env.isNight) {
+        webcamFeed.style.filter = 'grayscale(100%) contrast(1.2) brightness(0.9) sepia(20%) hue-rotate(80deg)';
+    } else {
+        webcamFeed.style.filter = 'none';
+    }
+
+    const summaryDiv = document.getElementById('settings-summary');
+
+    if (cameraState.power === 'OFF') {
+        viewScreen.classList.add('off');
+        powerSwitchKnob.classList.add('off');
+        powerSwitchKnob.classList.remove('on');
+        if (summaryDiv) summaryDiv.classList.add('hidden');
+    } else {
+        viewScreen.classList.remove('off');
+        powerSwitchKnob.classList.remove('off');
+        powerSwitchKnob.classList.add('on');
+        if (summaryDiv) summaryDiv.classList.remove('hidden');
+        renderSettingsSummary();
+    }
+
+    switch (cameraState.ui.currentScreen) {
+        case 'LIVE':
+            webcamFeed.classList.remove('hidden');
+            liveViewOverlay.classList.remove('hidden');
+            renderLiveViewOverlay();
+            break;
+        case 'MENU': renderMenuScreen(); break;
+        case 'PLAYBACK':
+            playbackImage.classList.remove('hidden');
+            renderPlaybackScreen();
+            break;
+        case 'SET_KEYBOARD': renderKeyboardScreen(); break;
+        case 'SET_TIME': renderSetTimeScreen(); break;
+        case 'SET_FIELD_SCAN': renderSetFieldScanScreen(); break;
+        case 'DELETE': renderDeleteScreen(); break;
+        case 'MESSAGE': break;
+    }
+}
+
+function renderLiveViewOverlay() {
+    const { settings, sdCard, ui, env } = cameraState;
+    const imageSizeMap = { 'Low (低)': '2M', 'Medium (中)': '10M', 'High (高)': '32M' };
+    const videoSizeMap = { '1280x720': '720P', '1920x1080': '1080P', '3840x2160': '4K' };
+    const modeIcon = { 'Camera (相機)': '📷', 'Video (影片)': '📹', 'Hybrid (混合)': '📷+📹' };
+    const nightIcon = env.isNight ? '🌙' : '☀️';
+
+    let topContent;
+    if (ui.isRecording) {
+        const timer = ui.recordingTimer;
+        const minutes = String(Math.floor(timer / 60)).padStart(2, '0');
+        const seconds = String(timer % 60).padStart(2, '0');
+        topContent = `
+            <div class="flex items-center gap-2">
+                <div class="recording-dot"></div>
+                <span class="text-xl text-red-500">REC</span>
+            </div>
+            <span class="text-xl text-white font-mono">${minutes}:${seconds}</span>
+        `;
+    } else {
+        let sizeDisplay;
+        let capacityDisplay;
+
+        if (settings.mode === 'Camera (相機)') {
+            sizeDisplay = imageSizeMap[settings.imageSize];
+            const taken = sdCard.files.filter(f => f.type === 'photo').length;
+            const remaining = sdCard.photoCapacity[settings.imageSize] - taken;
+            capacityDisplay = `<span>${String(taken).padStart(4, '0')}/${String(remaining).padStart(4, '0')}</span>`;
+        } else {
+            sizeDisplay = videoSizeMap[settings.videoSize];
+            const time = sdCard.remainingVideoTime;
+            const hours = String(Math.floor(time / 3600)).padStart(2, '0');
+            const minutes = String(Math.floor((time % 3600) / 60)).padStart(2, '0');
+            const seconds = String(time % 60).padStart(2, '0');
+            capacityDisplay = `<span>${hours}:${minutes}:${seconds}</span>`;
+        }
+
+        const timeStampIcon = settings.timeStamp === 'On (開啟)' ? '<span class="text-sm border rounded px-0.5">T</span>' : '';
+        const fsIcon = settings.fieldScan === 'On (開啟)' ? '<span class="text-sm border rounded px-0.5">FS</span>' : '';
+
+         topContent = `
+            <div class="flex flex-col items-start gap-1">
+                <div class="flex items-baseline gap-2">
+                    <span class="text-xl">${modeIcon[settings.mode]}</span>
+                    <span class="text-base">${sizeDisplay}</span>
+                    <span class="text-sm">${nightIcon}</span>
+                </div>
+                <div class="flex gap-1">${timeStampIcon}${fsIcon}</div>
+            </div>
+            <div class="flex flex-col items-end text-base font-mono">
+                ${capacityDisplay}
+            </div>
+        `;
+    }
+
+    liveViewOverlay.innerHTML = `
+        <div class="w-full h-full flex flex-col justify-between p-1 text-white font-bold" style="text-shadow: 0 1px 2px rgba(0,0,0,0.8);">
+            <div class="flex justify-between items-start">${topContent}</div>
+            <div class="flex justify-between items-end">
+                <div class="w-7 h-4 border-2 border-white rounded-sm flex items-center p-0.5 gap-0.5">
+                    <div class="h-full w-1/3 bg-white rounded-sm"></div>
+                    <div class="h-full w-1/3 bg-white rounded-sm"></div>
+                    <div class="h-full w-1/3 bg-white rounded-sm"></div>
+                </div>
+                <span class="text-lg">💾</span>
+            </div>
+        </div>
+    `;
+}
+
+function renderMenuScreen() {
+    const { currentPageIndex, selectedOptionIndex } = cameraState.ui.menu;
+    const currentMenuItem = menuStructure[currentPageIndex];
+    let optionsHtml = '';
+
+    if (currentMenuItem.type === 'options') {
+        const currentSettingValue = cameraState.settings[currentMenuItem.key];
+        const displayOptions = currentMenuItem.options;
+        const startIndex = Math.max(0, selectedOptionIndex - 2);
+        const visibleOptions = displayOptions.slice(startIndex, startIndex + 5);
+
+        optionsHtml = visibleOptions.map((opt, idx) => {
+            const realIndex = startIndex + idx;
+            return `
+            <div class="flex justify-between items-center p-1 rounded text-base gap-2">
+                <div class="checkmark-box ${currentSettingValue === opt ? 'checked' : ''}"></div>
+                <div class="flex-1 text-center py-1 rounded ${selectedOptionIndex === realIndex ? 'menu-item-text selected' : ''}">${opt}</div>
+                <div class="placeholder-box"></div>
+            </div>
+        `}).join('');
+    } else {
+        optionsHtml = `
+            <div class="w-full flex justify-between items-center text-base gap-2 h-full">
+                <div class="placeholder-box"></div>
+                <div class="flex-1 text-center py-1 rounded menu-item-text selected">
+                    ${currentMenuItem.type === 'info' ? currentMenuItem.info : 'Execute (執行)'}
+                </div>
+                <div class="placeholder-box"></div>
+            </div>
+        `;
+    }
+
+    screenMessage.innerHTML = `
+        <div class="flex flex-col h-full bg-slate-200 text-black">
+            <div class="bg-black text-white text-center py-1 flex items-center justify-between px-4 flex-shrink-0 font-bold text-base">
+                <span>◀</span><span class="truncate px-2">${currentMenuItem.name}</span><span>▶</span>
+            </div>
+            <div class="flex-grow p-2 space-y-1 overflow-y-auto flex flex-col justify-center">
+                ${optionsHtml}
+            </div>
+            <div class="bg-black text-white text-center py-1 flex justify-around flex-shrink-0 text-base">
+                <span>OK: Confirm (確認)</span><span>MENU: Back (返回)</span>
+            </div>
+        </div>
+    `;
+}
+
+function renderPlaybackScreen() {
+    const { files } = cameraState.sdCard;
+    const { ui } = cameraState;
+
+    if (files.length === 0) {
+        screenMessage.innerHTML = `<div class="flex items-center justify-center h-full text-center text-black bg-slate-200 font-bold">NO FILES (沒有檔案)</div>`;
+        playbackImage.src = '';
+        playbackImage.classList.add('hidden');
+        return;
+    }
+
+    const file = files[ui.playbackIndex];
+    if (file.type === 'photo') {
+        playbackImage.src = file.data;
+        playbackImage.style.transform = `scale(${ui.zoomLevel}) translate(${ui.panOffset.x}px, ${ui.panOffset.y}px)`;
+    } else if (file.type === 'video') {
+        const frameIndex = Math.min(Math.floor(ui.playbackTimer * 24), file.frames.length - 1);
+        playbackImage.src = file.frames[frameIndex] || file.data;
+        playbackImage.style.transform = ''; 
+    }
+
+    let topBarHTML, hintText = '';
+    const fileCounterHTML = `<span>${String(ui.playbackIndex + 1).padStart(4, '0')}/${String(files.length).padStart(4, '0')}</span>`;
+
+    if (file.type === 'photo') {
+        if (ui.playbackZoomState === 'normal') hintText = '[◀]⊕⊝ [▲▼]SELECT (選擇)';
+        else if (ui.playbackZoomState === 'zoomed') hintText = '[▲▼]⊕⊝ [OK]CONTRL (控制)';
+        else hintText = '[▲▼◀▶]MOVE [OK]EXIT (退出)';
+        
+        topBarHTML = `<div class="flex justify-between items-center text-lg w-full"><span>📷</span>${fileCounterHTML}</div>`;
+    } else if (file.type === 'video') {
+        const currentM = String(Math.floor(ui.playbackTimer / 60)).padStart(2, '0');
+        const currentS = String(Math.floor(ui.playbackTimer) % 60).padStart(2, '0');
+        let timeDisplay;
+
+        if (ui.playbackState === 'playing') {
+            timeDisplay = `<span class="text-xl font-mono">00:${currentM}:${currentS}</span>`;
+            hintText = '[▶]PAUSE (暫停) [▲▼]SELECT (選擇)';
+        } else {
+            hintText = '[▶]PLAY (播放) [▲▼]SELECT (選擇)';
+            if (ui.playbackTimer > 0) timeDisplay = `<span class="text-xl font-mono">00:${currentM}:${currentS}</span>`;
+            else {
+                 const totalM = String(Math.floor(file.duration / 60)).padStart(2, '0');
+                 const totalS = String(file.duration % 60).padStart(2, '0');
+                 timeDisplay = `<span class="text-xl font-mono">00:${totalM}:${totalS}</span>`;
+            }
+        }
+        topBarHTML = `<div class="flex justify-between items-center text-lg w-full"><div class="flex items-baseline gap-3"><span>📹</span>${timeDisplay}</div>${fileCounterHTML}</div>`;
+    }
+
+    screenMessage.innerHTML = `
+        <div class="absolute inset-0 text-white flex flex-col justify-between p-1 pointer-events-none font-bold" style="text-shadow: 0 1px 2px rgba(0,0,0,0.8);">
+            ${topBarHTML}
+            <div class="text-base text-center">${hintText}</div>
+        </div>
+    `;
+}
+
+function renderKeyboardScreen() {
+    const { ui } = cameraState;
+    const { tempText, cursorX, cursorY, page, target } = ui.keyboard;
+    const title = target === 'cameraName' ? 'Enter Name (輸入名稱)' : 'Coordinate (輸入座標)';
+    
+    const chars = keyboardLayouts[page].split('');
+    let keyboardHtml = '<div class="grid grid-cols-10 gap-1 p-1">';
+    chars.forEach((char, index) => {
+        const y = Math.floor(index / 10);
+        const x = index % 10;
+        const isSelected = (x === cursorX && y === cursorY);
+        keyboardHtml += `<div class="text-center rounded font-bold ${isSelected ? 'keyboard-char selected' : 'bg-gray-400/50'}">${char === ' ' ? '␣' : char}</div>`;
+    });
+    keyboardHtml += '</div>';
+
+    screenMessage.innerHTML = `
+        <div class="flex flex-col h-full bg-slate-200 text-black">
+            <div class="bg-black text-white text-center py-1 font-bold text-sm">${title}</div>
+            <div class="bg-white m-1 p-1 text-center font-mono text-base tracking-widest h-8 text-red-600 border border-gray-400">${tempText}</div>
+            <div class="flex-grow text-sm">${keyboardHtml}</div>
+            <div class="bg-black text-white text-center py-1 flex justify-around flex-shrink-0 text-sm">
+                <span>OK: Select (選擇)</span><span>MENU: Save (儲存)</span>
+            </div>
+        </div>
+    `;
+}
+
+function renderSetTimeScreen() {
+    const { tempDate, fieldIndex } = cameraState.ui.timeSetter;
+    const t = { h: String(tempDate.getHours()).padStart(2, '0'), m: String(tempDate.getMinutes()).padStart(2, '0') };
+    const d = { mm: String(tempDate.getMonth() + 1).padStart(2, '0'), dd: String(tempDate.getDate()).padStart(2, '0'), yyyy: tempDate.getFullYear() };
+
+    screenMessage.innerHTML = `
+        <div class="flex flex-col h-full bg-slate-200 text-black">
+            <div class="bg-black text-white text-center py-1 font-bold text-base">Time & Date (時間與日期)</div>
+            <div class="flex-grow flex flex-col justify-center items-center p-2 space-y-4">
+                <div class="flex items-center justify-center text-3xl font-mono">
+                    <span class="p-2 rounded ${fieldIndex === 0 ? 'time-field selected' : ''}">${t.h}</span>:
+                    <span class="p-2 rounded ${fieldIndex === 1 ? 'time-field selected' : ''}">${t.m}</span>
+                </div>
+                <div class="flex items-center justify-center text-3xl font-mono">
+                    <span class="p-2 rounded ${fieldIndex === 2 ? 'time-field selected' : ''}">${d.mm}</span>-
+                    <span class="p-2 rounded ${fieldIndex === 3 ? 'time-field selected' : ''}">${d.dd}</span>-
+                    <span class="p-2 rounded ${fieldIndex === 4 ? 'time-field selected' : ''}">${d.yyyy}</span>
+                </div>
+            </div>
+            <div class="bg-black text-white text-center py-1 flex justify-around text-sm">
+                <span>▲▼: Adjust (調整)</span><span>◀▶: Switch (切換)</span><span>OK: Save (儲存)</span>
+            </div>
+        </div>
+    `;
+}
+
+function renderSetFieldScanScreen() {
+    const { fieldScanData } = cameraState.settings;
+    const { fieldIndex } = cameraState.ui.fieldScanSetter;
+    const pad = (n) => String(n).padStart(2, '0');
+
+    const getCls = (idx) => fieldIndex === idx ? 'bg-yellow-400 text-black px-1 rounded' : '';
+
+    screenMessage.innerHTML = `
+        <div class="flex flex-col h-full bg-slate-200 text-black">
+            <div class="bg-black text-white text-center py-1 font-bold text-base">Field Scan (現場掃描設定)</div>
+            <div class="flex-grow flex flex-col justify-center items-center p-2 font-mono text-lg space-y-2">
+                <div>A Block (A區段): <span class="${getCls(0)}">${pad(fieldScanData.aStartH)}</span>:<span class="${getCls(1)}">${pad(fieldScanData.aStartM)}</span> - <span class="${getCls(2)}">${pad(fieldScanData.aStopH)}</span>:<span class="${getCls(3)}">${pad(fieldScanData.aStopM)}</span></div>
+                <div>B Block (B區段): <span class="${getCls(4)}">${pad(fieldScanData.bStartH)}</span>:<span class="${getCls(5)}">${pad(fieldScanData.bStartM)}</span> - <span class="${getCls(6)}">${pad(fieldScanData.bStopH)}</span>:<span class="${getCls(7)}">${pad(fieldScanData.bStopM)}</span></div>
+                <div class="pt-2">Interval (觸發間隔): <span class="${getCls(8)}">${pad(fieldScanData.intervalM)}</span> M</div>
+            </div>
+            <div class="bg-black text-white text-center py-1 flex justify-around text-sm">
+                <span>▲▼: Adjust (調整)</span><span>◀▶: Switch (切換)</span><span>MENU: Save (儲存)</span>
+            </div>
+        </div>
+    `;
+}
+
+function renderDeleteScreen() {
+    const { ui } = cameraState;
+    let title = ui.deleteConfirmStep === 0 ? "Delete (刪除)" : "Are you sure? (您確定嗎？)";
+    let options = ui.deleteConfirmStep === 0 ? ["Delete Current (刪除目前檔案)", "Delete All (刪除全部)"] : ["Yes (是)", "No (否)"];
+    let defaultOption = ui.deleteConfirmStep === 0 ? ui.deleteDefaultOption : "No (否)"; 
+
+    const optionsHtml = options.map((opt, index) => `
+        <div class="flex justify-between items-center p-1 rounded text-base gap-2">
+            <div class="checkmark-box ${opt === defaultOption ? 'checked' : ''}"></div>
+            <div class="flex-1 text-center py-1 rounded ${ui.menu.selectedOptionIndex === index ? 'menu-item-text selected' : ''}">${opt}</div>
+            <div class="placeholder-box"></div>
+        </div>
+    `).join('');
+
+    screenMessage.innerHTML = `
+        <div class="flex flex-col h-full bg-slate-200 text-black">
+            <div class="bg-black text-white text-center py-1 font-bold text-base"><span>◀</span> ${title} <span>▶</span></div>
+            <div class="flex-grow p-2 space-y-1">${optionsHtml}</div>
+            <div class="bg-black text-white text-center py-1 flex justify-around text-base"><span>OK: Confirm (確認)</span><span>MENU: Back (返回)</span></div>
+        </div>
+    `;
+}
+
+function renderSettingsSummary() {
+    const container = document.getElementById('settings-table');
+    const clockContainer = document.getElementById('clock-display');
+    if (!container || !clockContainer || cameraState.power === 'OFF') return;
+
+    const now = cameraState.settings.timeAndDate;
+    const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}/${now.getFullYear()}`;
+    let hours = now.getHours();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; 
+    const timeStr = `${String(hours).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} ${ampm}`;
+    clockContainer.innerHTML = `<span>${dateStr}</span> <span class="ml-4">${timeStr}</span>`;
+
+    const { settings } = cameraState;
+    const summaryItems = [
+        { label: 'Pre-Sets (預設集)', val: settings.preSet },
+        { label: 'Mode (模式)', val: settings.mode },
+        { label: 'Image Size (影像尺寸)', val: settings.imageSize },
+        { label: 'Capture Num (拍攝張數)', val: settings.captureNumber },
+        { label: 'Image Format (影像格式)', val: settings.imageFormat },
+        { label: 'Illumination (夜視亮度)', val: settings.illuminationMode },
+        { label: 'Camera Name (相機名稱)', val: settings.cameraName },
+        { label: 'Video Size (影片尺寸)', val: settings.videoSize },
+        { label: 'Video Length (影片長度)', val: settings.videoLength },
+        { label: 'Delay (延遲)', val: settings.delay },
+        { label: 'Sensor Level (感應靈敏度)', val: settings.sensorLevel },
+        { label: 'Camera Mode (運作時段)', val: settings.cameraMode },
+        { label: 'Time Stamp (時間戳)', val: settings.timeStamp },
+        { label: 'Field Scan (現場掃描)', val: settings.fieldScan },
+        { label: 'Coordinate (座標輸入)', val: settings.coordinateInput + (settings.coordinateInput === 'On (開啟)' && settings.coordinateInputText ? ` [${settings.coordinateInputText}]` : '') }
+    ];
+
+    const midpoint = Math.ceil(summaryItems.length / 2);
+    const leftItems = summaryItems.slice(0, midpoint);
+    const rightItems = summaryItems.slice(midpoint);
+
+    const generateColumnHtml = (items) => {
+        return items.map(item => {
+            let valColor = 'text-white';
+            if (item.val === 'On (開啟)') valColor = 'text-green-400';
+            else if (item.val === 'Off (關閉)') valColor = 'text-red-400';
+            
+            return `
+            <div class="flex justify-between border-b border-gray-600/50 py-1">
+                <span class="text-gray-400 truncate pr-2">${item.label}</span>
+                <span class="font-bold ${valColor} text-right whitespace-nowrap">${item.val}</span>
+            </div>
+            `;
+        }).join('');
+    };
+
+    container.innerHTML = `
+        <div class="flex flex-col">${generateColumnHtml(leftItems)}</div>
+        <div class="flex flex-col md:border-l md:pl-6 border-gray-600/50">${generateColumnHtml(rightItems)}</div>
+    `;
+}
+
+// ==========================================
+// 4. 事件觸發處理邏輯
+// ==========================================
+function setTimeDate() {
+    cameraState.ui.timeSetter.tempDate = new Date(cameraState.settings.timeAndDate);
+    cameraState.ui.currentScreen = 'SET_TIME'; 
+    render();
+}
+
+function setCameraName() {
+    cameraState.ui.keyboard.target = 'cameraName';
+    cameraState.ui.keyboard.tempText = cameraState.settings.cameraName;
+    cameraState.ui.keyboard.cursorX = 0; 
+    cameraState.ui.keyboard.cursorY = 0; 
+    cameraState.ui.keyboard.page = 0;
+    cameraState.ui.currentScreen = 'SET_KEYBOARD'; 
+    render();
+}
+
+function formatSD(showModal = false) {
+    if (showModal) {
+        showConfirmationModal('Format SD Card (格式化 SD 卡)', 'This will delete all files on this card. Are you sure you want to continue? (這將會刪除此卡上的所有檔案。您確定要繼續嗎？)', () => { 
+            cameraState.sdCard.files = []; 
+            cameraState.ui.currentScreen = 'LIVE'; 
+            render(); 
+        });
+    } else { 
+        cameraState.sdCard.files = []; 
+        cameraState.ui.currentScreen = 'LIVE'; 
+        render(); 
+    }
+}
+
+function handlePowerSwitch() {
+    if (cameraState.power === 'OFF') {
+        cameraState.power = 'ON';
+        initWebcam();
+        cameraState.ui.clockInterval = setInterval(() => {
+            if (cameraState.power === 'ON') {
+                cameraState.settings.timeAndDate.setSeconds(cameraState.settings.timeAndDate.getSeconds() + 1);
+                renderSettingsSummary();
+            }
+        }, 1000);
+    } else {
+        cameraState.power = 'OFF';
+        stopWebcam();
+        cameraState.ui.currentScreen = 'OFF';
+        if (cameraState.ui.clockInterval) {
+            clearInterval(cameraState.ui.clockInterval);
+            cameraState.ui.clockInterval = null;
+        }
+        render();
+    }
+}
+
+function applyPreset(preset) {
+    const { settings } = cameraState;
+    settings.preSet = preset; 
+    switch (preset) {
+        case 'Feeder (定點餵食區)':
+            settings.imageSize = 'Medium (中)';
+            settings.captureNumber = 3;
+            settings.delay = '3M';
+            break;
+        case 'Trail (獸徑)':
+            settings.imageSize = 'Medium (中)';
+            settings.captureNumber = 1;
+            settings.delay = '0.5S';
+            break;
+        case 'Food Plot (開闊覓食區)':
+            settings.imageSize = 'High (高)';
+            settings.captureNumber = 1;
+            settings.delay = '2S';
+            settings.fieldScan = 'On (開啟)';
+            settings.fieldScanData = { aStartH: 5, aStartM: 30, aStopH: 9, aStopM: 0, bStartH: 15, bStartM: 30, bStopH: 19, bStopM: 30, intervalM: 5 };
+            break;
+    }
+}
+
+function stopVideoPlayback() {
+    const { ui } = cameraState;
+    if (ui.playbackIntervalId) { clearInterval(ui.playbackIntervalId); ui.playbackIntervalId = null; }
+    ui.playbackState = 'paused';
+    ui.playbackTimer = 0;
+}
+
+function stopRecording() {
+    const { ui, sdCard } = cameraState;
+    if (!ui.isRecording) return;
+    clearInterval(ui.recordingIntervalId); clearInterval(ui.recordingTimerInterval); clearTimeout(ui.recordingTimeoutId);
+    ui.isRecording = false; ui.recordingIntervalId = null; ui.recordingTimerInterval = null; ui.recordingTimeoutId = null;
+
+    const videoFile = ui.currentRecordingFile;
+    if (videoFile && videoFile.frames.length > 0) {
+        videoFile.duration = ui.recordingTimer;
+        sdCard.files.push(videoFile);
+        sdCard.remainingVideoTime -= videoFile.duration;
+    }
+    ui.currentRecordingFile = null;
+    showTemporaryMessage(`Recording Ended! (錄影結束！)\nVideo saved to simulated SD card. (影片已儲存至模擬 SD 卡。)`);
+    render();
+}
+
+function resetPhotoPlayback() {
+    const { ui } = cameraState;
+    ui.playbackZoomState = 'normal'; ui.zoomLevel = 1.0; ui.panOffset = { x: 0, y: 0 };
+    if(playbackImage) playbackImage.style.transform = '';
+}
+
+function handleMenuButton() {
+    if (cameraState.power === 'OFF' || cameraState.ui.isRecording) return;
+    const { ui } = cameraState;
+    
+    switch(ui.currentScreen) {
+        case 'LIVE': ui.currentScreen = 'MENU'; break;
+        case 'PLAYBACK':
+            stopVideoPlayback(); resetPhotoPlayback();
+            ui.currentScreen = 'DELETE'; ui.deleteConfirmStep = 0; ui.menu.selectedOptionIndex = 0;
+            break;
+        case 'MENU': ui.currentScreen = 'LIVE'; break;
+        case 'DELETE': ui.currentScreen = 'PLAYBACK'; ui.deleteConfirmStep = 0; break;
+        case 'SET_KEYBOARD': 
+            cameraState.settings[ui.keyboard.target] = ui.keyboard.tempText;
+            ui.currentScreen = 'MENU'; 
+            break;
+        case 'SET_TIME':
+        case 'SET_FIELD_SCAN':
+            ui.currentScreen = 'MENU'; 
+            break;
+        case 'MESSAGE':
+            ui.currentScreen = 'MENU'; 
+            break;
+    }
+    render();
+}
+
+function handleOkButton() {
+    if (cameraState.power === 'OFF' || cameraState.ui.isRecording) return;
+    const { ui, settings, sdCard } = cameraState;
+    
+    switch(ui.currentScreen) {
+        case 'LIVE':
+            ui.currentScreen = 'PLAYBACK';
+            ui.playbackIndex = Math.max(0, sdCard.files.length - 1);
+            break;
+        case 'PLAYBACK':
+            if(sdCard.files.length > 0 && sdCard.files[ui.playbackIndex].type === 'photo' && ui.playbackZoomState !== 'normal') {
+                if (ui.playbackZoomState === 'zoomed') ui.playbackZoomState = 'panning';
+                else resetPhotoPlayback();
+            } else {
+                stopVideoPlayback(); resetPhotoPlayback(); ui.currentScreen = 'LIVE';
+            }
+            break;
+        case 'MENU':
+            const menuItem = menuStructure[ui.menu.currentPageIndex];
+            if (menuItem.type === 'options') {
+                const newValue = menuItem.options[ui.menu.selectedOptionIndex];
+                settings[menuItem.key] = newValue;
+                if (menuItem.key === 'preSet') applyPreset(newValue);
+                if (menuItem.key === 'videoSize') sdCard.remainingVideoTime = sdCard.videoCapacity[newValue];
+                
+                if (menuItem.key === 'coordinateInput' && newValue === 'On (開啟)') {
+                    ui.currentScreen = 'SET_KEYBOARD';
+                    ui.keyboard.target = 'coordinateInputText';
+                    ui.keyboard.tempText = settings.coordinateInputText || '';
+                    ui.keyboard.cursorX = 0; ui.keyboard.cursorY = 0; ui.keyboard.page = 0;
+                } else if (menuItem.key === 'fieldScan' && newValue === 'On (開啟)') {
+                    ui.currentScreen = 'SET_FIELD_SCAN';
+                    ui.fieldScanSetter.fieldIndex = 0;
+                }
+            } else if (menuItem.type === 'action') {
+                // 安全的 Action 對應呼叫，避免 window[] 呼叫導致的 undefined
+                switch (menuItem.action) {
+                    case 'setTimeDate': setTimeDate(); break;
+                    case 'setCameraName': setCameraName(); break;
+                    case 'formatSD': formatSD(true); break;
+                    case 'resetToDefault': resetToDefault(true); break;
+                }
+            }
+            break;
+        case 'SET_KEYBOARD':
+            const { cursorX, cursorY, page } = ui.keyboard;
+            const selectedChar = keyboardLayouts[page][cursorY * 10 + cursorX];
+            if (selectedChar === '←') ui.keyboard.tempText = ui.keyboard.tempText.slice(0, -1);
+            else if (ui.keyboard.tempText.length < 12) ui.keyboard.tempText += (selectedChar === ' ' ? ' ' : selectedChar);
+            break;
+        case 'SET_TIME':
+            settings.timeAndDate = new Date(ui.timeSetter.tempDate);
+            ui.currentScreen = 'MENU';
+            break;
+        case 'DELETE':
+            if (ui.deleteConfirmStep === 0) {
+                ui.deleteAction = ui.menu.selectedOptionIndex === 0 ? 'current' : 'all';
+                ui.deleteConfirmStep = 1; ui.menu.selectedOptionIndex = 1;
+            } else {
+                if (ui.menu.selectedOptionIndex === 0) { 
+                    if (ui.deleteAction === 'current') {
+                        sdCard.files.splice(ui.playbackIndex, 1);
+                        ui.playbackIndex = Math.max(0, ui.playbackIndex - 1);
+                    } else sdCard.files = [];
+                }
+                ui.deleteConfirmStep = 0; ui.deleteAction = null;
+                ui.currentScreen = sdCard.files.length > 0 ? 'PLAYBACK' : 'LIVE';
+            }
+            break;
+    }
+    render();
+}
+
+function handleArrowKeys(direction) {
+    if (cameraState.power === 'OFF') return;
+    const { ui, settings } = cameraState;
+    
+    switch(ui.currentScreen) {
+        case 'LIVE':
+            if (direction === 'right') handleTriggerEvent();
+            else if (direction === 'up' && settings.mode === 'Camera (相機)') settings.mode = 'Video (影片)';
+            else if (direction === 'down' && settings.mode === 'Video (影片)') settings.mode = 'Camera (相機)';
+            break;
+        case 'MENU':
+            const { menu } = ui;
+            const menuItem = menuStructure[menu.currentPageIndex];
+            if (direction === 'up' || direction === 'down') {
+                if (menuItem.type === 'options') {
+                    const len = menuItem.options.length;
+                    menu.selectedOptionIndex = (menu.selectedOptionIndex + (direction === 'down' ? 1 : -1) + len) % len;
+                }
+            } else if (direction === 'left' || direction === 'right') {
+                menu.currentPageIndex = (menu.currentPageIndex + (direction === 'right' ? 1 : -1) + menuStructure.length) % menuStructure.length;
+                const newMenu = menuStructure[menu.currentPageIndex];
+                if (newMenu.type === 'options') menu.selectedOptionIndex = Math.max(0, newMenu.options.indexOf(settings[newMenu.key]));
+                else menu.selectedOptionIndex = 0;
+            }
+            break;
+        case 'PLAYBACK':
+            if (cameraState.sdCard.files.length > 0) {
+                const currentFile = cameraState.sdCard.files[ui.playbackIndex];
+                if (currentFile.type === 'photo') {
+                    if (ui.playbackZoomState === 'normal') {
+                        if (direction === 'up' || direction === 'down') ui.playbackIndex = (ui.playbackIndex + (direction === 'down' ? 1 : -1) + cameraState.sdCard.files.length) % cameraState.sdCard.files.length;
+                        else if (direction === 'left') { ui.playbackZoomState = 'zoomed'; ui.zoomLevel = 1.2; }
+                    } else if (ui.playbackZoomState === 'zoomed') {
+                        if (direction === 'up') ui.zoomLevel += 0.2;
+                        if (direction === 'down') ui.zoomLevel = Math.max(1.0, ui.zoomLevel - 0.2);
+                    } else {
+                        const panStep = 20;
+                        const maxPanX = (playbackImage.clientWidth * ui.zoomLevel - viewScreen.clientWidth) / (2 * ui.zoomLevel);
+                        const maxPanY = (playbackImage.clientHeight * ui.zoomLevel - viewScreen.clientHeight) / (2 * ui.zoomLevel);
+                        if (direction === 'up') ui.panOffset.y = Math.min(maxPanY, ui.panOffset.y + panStep);
+                        if (direction === 'down') ui.panOffset.y = Math.max(-maxPanY, ui.panOffset.y - panStep);
+                        if (direction === 'left') ui.panOffset.x = Math.min(maxPanX, ui.panOffset.x + panStep);
+                        if (direction === 'right') ui.panOffset.x = Math.max(-maxPanX, ui.panOffset.x - panStep);
+                    }
+                } else if (currentFile.type === 'video') {
+                    if (direction === 'up' || direction === 'down') {
+                        stopVideoPlayback();
+                        ui.playbackIndex = (ui.playbackIndex + (direction === 'down' ? 1 : -1) + cameraState.sdCard.files.length) % cameraState.sdCard.files.length;
+                    } else if (direction === 'right') {
+                        if (ui.playbackState === 'paused') {
+                            ui.playbackState = 'playing';
+                            ui.playbackIntervalId = setInterval(() => {
+                                if (ui.playbackTimer >= currentFile.duration) stopVideoPlayback();
+                                else ui.playbackTimer += (1000/24) / 1000;
+                                render();
+                            }, 1000/24);
+                        } else {
+                            if (ui.playbackIntervalId) clearInterval(ui.playbackIntervalId);
+                            ui.playbackState = 'paused';
+                        }
+                    }
+                }
+            }
+            break;
+        case 'DELETE':
+            if (direction === 'up' || direction === 'down') ui.menu.selectedOptionIndex = (ui.menu.selectedOptionIndex + (direction === 'down' ? 1 : -1) + 2) % 2;
+            break;
+        case 'SET_KEYBOARD':
+            let { cursorX, cursorY, page } = ui.keyboard;
+            if (direction === 'up') { if (cursorY > 0) cursorY--; else { ui.keyboard.page = (page + 1) % 2; cursorY = 3; } }
+            else if (direction === 'down') { if (cursorY < 3) cursorY++; else { ui.keyboard.page = (page + 1) % 2; cursorY = 0; } }
+            else if (direction === 'left') cursorX = (cursorX - 1 + 10) % 10;
+            else if (direction === 'right') cursorX = (cursorX + 1) % 10;
+            ui.keyboard.cursorX = cursorX; ui.keyboard.cursorY = cursorY;
+            break;
+        case 'SET_TIME':
+            const { timeSetter } = ui;
+            if (direction === 'left' || direction === 'right') timeSetter.fieldIndex = (timeSetter.fieldIndex + (direction === 'right' ? 1 : -1) + 5) % 5;
+            else {
+                const change = direction === 'up' ? 1 : -1;
+                switch(timeSetter.fieldIndex) {
+                    case 0: timeSetter.tempDate.setHours(timeSetter.tempDate.getHours() + change); break;
+                    case 1: timeSetter.tempDate.setMinutes(timeSetter.tempDate.getMinutes() + change); break;
+                    case 2: timeSetter.tempDate.setMonth(timeSetter.tempDate.getMonth() + change); break;
+                    case 3: timeSetter.tempDate.setDate(timeSetter.tempDate.getDate() + change); break;
+                    case 4: timeSetter.tempDate.setFullYear(timeSetter.tempDate.getFullYear() + change); break;
+                }
+            }
+            break;
+        case 'SET_FIELD_SCAN':
+            const { fieldScanSetter } = ui;
+            const fsData = settings.fieldScanData;
+            if (direction === 'left' || direction === 'right') fieldScanSetter.fieldIndex = (fieldScanSetter.fieldIndex + (direction === 'right' ? 1 : -1) + 9) % 9;
+            else {
+                const change = direction === 'up' ? 1 : -1;
+                switch(fieldScanSetter.fieldIndex) {
+                    case 0: fsData.aStartH = (fsData.aStartH + change + 24) % 24; break;
+                    case 1: fsData.aStartM = (fsData.aStartM + change + 60) % 60; break;
+                    case 2: fsData.aStopH = (fsData.aStopH + change + 24) % 24; break;
+                    case 3: fsData.aStopM = (fsData.aStopM + change + 60) % 60; break;
+                    case 4: fsData.bStartH = (fsData.bStartH + change + 24) % 24; break;
+                    case 5: fsData.bStartM = (fsData.bStartM + change + 60) % 60; break;
+                    case 6: fsData.bStopH = (fsData.bStopH + change + 24) % 24; break;
+                    case 7: fsData.bStopM = (fsData.bStopM + change + 60) % 60; break;
+                    case 8: fsData.intervalM = Math.max(1, Math.min(60, fsData.intervalM + change)); break;
+                }
+            }
+            break;
+    }
+    render();
+}
+
+function handleTriggerEvent() {
+    if (cameraState.power === 'OFF' || cameraState.ui.currentScreen !== 'LIVE' || !cameraState.webcamStream) return;
+    const { settings, ui, sdCard, env } = cameraState;
+
+    if (ui.isRecording) { stopRecording(); return; }
+    
+    const takePhoto = (forcedInfo = {}) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = webcamFeed.videoWidth || 640; 
+        canvas.height = webcamFeed.videoHeight || 480;
+        const ctx = canvas.getContext('2d');
+        
+        if (env.isNight) ctx.filter = 'grayscale(100%) contrast(1.2) brightness(0.9) sepia(20%) hue-rotate(80deg)';
+        ctx.drawImage(webcamFeed, 0, 0, canvas.width, canvas.height);
+        ctx.filter = 'none';
+        
+        if (settings.timeStamp === 'On (開啟)') {
+            const now = new Date();
+            const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${now.getFullYear()}`;
+            const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+            const tempStr = forcedInfo.tempStr || `${Math.round(Math.random() * 30 + 50)}°F ${Math.round(Math.random() * 15 + 10)}°C`;
+            const moonPhase = forcedInfo.moonPhase || ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'][Math.floor(Math.random() * 8)];
+            
+            const infoBarHeight = 28;
+            ctx.fillStyle = 'white'; ctx.fillRect(0, canvas.height - infoBarHeight, canvas.width, infoBarHeight);
+            ctx.textBaseline = 'middle';
+            
+            let xPos = 0;
+            const logoSize = infoBarHeight * 2;
+            ctx.fillStyle = '#FF6D08'; ctx.fillRect(0, canvas.height - logoSize, logoSize, logoSize);
+            ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = 'white'; ctx.textAlign = 'center';
+            ctx.fillText('Ⓑ', logoSize / 2, canvas.height - (logoSize / 2) - 4);
+            ctx.font = 'bold 12px sans-serif'; ctx.fillText('Bullshit', logoSize / 2, canvas.height - 12);
+            
+            ctx.textAlign = 'left'; xPos = logoSize + 8;
+            ctx.font = '16px "Roboto Mono", monospace'; ctx.fillStyle = 'black';
+            ctx.fillText('Ⓜ', xPos, canvas.height - (infoBarHeight/2)); xPos += 25;
+            ctx.fillText(settings.cameraName, xPos, canvas.height - (infoBarHeight/2));
+            
+            if (settings.coordinateInput === 'On (開啟)' && settings.coordinateInputText) {
+                const coordWidth = ctx.measureText(settings.cameraName).width;
+                ctx.fillText(` [GPS:${settings.coordinateInputText}]`, xPos + coordWidth, canvas.height - (infoBarHeight/2));
+            }
+            
+            const dateTimeStr = `${dateStr} ${timeStr}`;
+            const dateTimeWidth = ctx.measureText(dateTimeStr).width;
+            ctx.fillText(dateTimeStr, canvas.width - dateTimeWidth - 10, canvas.height - (infoBarHeight/2));
+
+            const tempWidth = ctx.measureText(tempStr).width;
+            const tempX = (canvas.width - tempWidth) / 2;
+            ctx.fillText(tempStr, tempX, canvas.height - (infoBarHeight/2));
+            ctx.fillText(moonPhase, tempX + tempWidth + 15, canvas.height - (infoBarHeight/2));
+        }
+        return canvas.toDataURL('image/jpeg');
+    };
+
+    const downloadFile = (dataUrl, filename) => {
+        const link = document.createElement('a'); link.href = dataUrl; link.download = filename;
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    };
+
+    if (settings.mode === 'Camera (相機)') {
+        const picsToTake = parseInt(settings.captureNumber) || 1;
+        let taken = 0;
+        const shoot = () => {
+            const dataUrl = takePhoto();
+            sdCard.files.push({ type: 'photo', data: dataUrl });
+            viewScreen.style.transition = 'filter 0.05s'; viewScreen.style.filter = 'brightness(1.5) contrast(1.2)';
+            setTimeout(() => { viewScreen.style.filter = 'brightness(1) contrast(1)'; }, 100);
+            taken++;
+            if (taken < picsToTake) setTimeout(shoot, 500);
+            else {
+                showTemporaryMessage(`Capture Successful! (拍攝成功！)\nSaved ${picsToTake} photos (共拍攝 ${picsToTake} 張照片)`);
+                downloadFile(dataUrl, `BUSHNELL_PHOTO_${Date.now()}.jpg`);
+            }
+        };
+        shoot();
+    }
+
+    if (settings.mode === 'Video (影片)' || settings.mode === 'Hybrid (混合)') {
+        ui.isRecording = true; ui.recordingTimer = 0;
+        
+        if (settings.mode === 'Hybrid (混合)') {
+             for(let i=0; i<(parseInt(settings.captureNumber)||1); i++) sdCard.files.push({ type: 'photo', data: takePhoto() });
+        }
+        
+        let actualLength = 10;
+        if (settings.videoLength === 'Dynamic (動態)') actualLength = env.isNight ? 15 : 30; 
+        else actualLength = parseInt(settings.videoLength.replace('S', ''));
+        
+        if (env.isNight && settings.illuminationMode === 'Long Range (長距離)') {
+            actualLength = Math.min(actualLength, 15);
+            console.log("硬體保護啟動：夜間 Long Range 模式最高限制 15 秒影片");
+        }
+
+        const videoFile = { type: 'video', data: null, frames: [], duration: actualLength, fixedInfo: { 
+            tempStr: `${Math.round(Math.random() * 36 * 9/5 + 32)}°F ${Math.floor(Math.random() * 36)}°C`, 
+            moonPhase: ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'][Math.floor(Math.random() * 8)] 
+        }};
+        ui.currentRecordingFile = videoFile;
+
+        ui.recordingIntervalId = setInterval(() => {
+            const frame = takePhoto(videoFile.fixedInfo);
+            videoFile.frames.push(frame);
+            if (!videoFile.data) videoFile.data = frame; 
+        }, 1000 / 24);
+
+        ui.recordingTimerInterval = setInterval(() => { ui.recordingTimer++; render(); }, 1000);
+        ui.recordingTimeoutId = setTimeout(stopRecording, actualLength * 1000);
+    }
+    render();
+}
+
+// ==========================================
+// 5. 初始化與事件綁定 (DOM 載入後執行)
+// ==========================================
+document.addEventListener('DOMContentLoaded', () => {
+    viewScreen = document.getElementById('view-screen'); 
+    webcamFeed = document.getElementById('webcam-feed');
+    playbackImage = document.getElementById('playback-image'); 
+    screenMessage = document.getElementById('screen-message');
+    powerSwitchSlider = document.getElementById('power-switch-slider'); 
+    powerSwitchKnob = document.getElementById('power-switch-knob');
+    liveViewOverlay = document.getElementById('live-view-overlay'); 
+    tempMessageOverlay = document.getElementById('temp-message-overlay');
+    modal = document.getElementById('modal'); 
+    modalTitle = document.getElementById('modal-title');
+    modalMessage = document.getElementById('modal-message'); 
+    modalConfirm = document.getElementById('modal-confirm');
+    modalCancel = document.getElementById('modal-cancel'); 
+    envNightToggle = document.getElementById('env-night-toggle');
+
+    resetToDefault();
+    if (cameraState.power === 'ON') initWebcam();
+
+    powerSwitchSlider.addEventListener('click', handlePowerSwitch);
+    document.getElementById('btn-menu').addEventListener('click', handleMenuButton);
+    document.getElementById('btn-ok').addEventListener('click', handleOkButton);
+    document.getElementById('btn-up').addEventListener('click', () => handleArrowKeys('up'));
+    document.getElementById('btn-down').addEventListener('click', () => handleArrowKeys('down'));
+    document.getElementById('btn-left').addEventListener('click', () => handleArrowKeys('left'));
+    document.getElementById('btn-right').addEventListener('click', () => handleArrowKeys('right'));
+    
+    envNightToggle.addEventListener('change', (e) => {
+        cameraState.env.isNight = e.target.checked;
+        render();
+    });
+
+    modalConfirm.addEventListener('click', () => { 
+        if (modalCallback) modalCallback(); 
+        hideModal(); 
+    });
+    modalCancel.addEventListener('click', hideModal);
+    modal.querySelector('.modal-backdrop').addEventListener('click', hideModal);
+});
+</script>
+</body>
+</html>
